@@ -8,7 +8,7 @@ import (
 func segmentTime(p *powerline) []pwl.Segment {
 	return []pwl.Segment{{
 		Name:       "time",
-		Content:    time.Now().Format("15:04:05"),
+		Content:    time.Now().Format("15:04"),
 		Foreground: p.theme.TimeFg,
 		Background: p.theme.TimeBg,
 	}}
