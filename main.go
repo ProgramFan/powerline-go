@@ -82,6 +82,7 @@ var modules = map[string]func(*powerline) []pwl.Segment{
 	"gcp":                 segmentGCP,
 	"git":                 segmentGit,
 	"gitlite":             segmentGitLite,
+	"tinygit":             segmentTinygit,
 	"goenv":               segmentGoenv,
 	"hg":                  segmentHg,
 	"svn":                 segmentSubversion,

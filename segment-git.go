@@ -6,9 +6,8 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
-
-    "github.com/go-git/go-git/v5"
 
 	pwl "github.com/justjanne/powerline-go/powerline"
 )
@@ -137,7 +136,7 @@ func getGitDetachedBranch(p *powerline) string {
 func parseGitStats(status []string) repoStats {
 	stats := repoStats{}
 	if len(status) > 1 {
-		for _, line := range status {
+		for _, line := range status[1:] {
 			if len(line) > 2 {
 				code := line[:2]
 				switch code {
@@ -161,14 +160,11 @@ func parseGitStats(status []string) repoStats {
 }
 
 func repoRoot(path string) (string, error) {
-	_, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-        DetectDotGit: true,
-        EnableDotGitCommonDir: true,
-    })
+	out, err := runGitCommand("git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
-	return path, nil
+	return strings.TrimSpace(out), nil
 }
 
 func indexSize(root string) (int64, error) {
@@ -190,51 +186,38 @@ func segmentGit(p *powerline) []pwl.Segment {
 		return []pwl.Segment{}
 	}
 
-    repo, err := git.PlainOpenWithOptions(p.cwd, &git.PlainOpenOptions{
-		DetectDotGit: true,
-		EnableDotGitCommonDir: true,
-    })
+	args := []string{
+		"status", "--porcelain", "-b", "--ignore-submodules",
+	}
+
+	if p.cfg.GitAssumeUnchangedSize > 0 {
+		indexSize, _ := indexSize(p.cwd)
+		if indexSize > (p.cfg.GitAssumeUnchangedSize * 1024) {
+			args = append(args, "-uno")
+		}
+	}
+
+	out, err := runGitCommand("git", args...)
 	if err != nil {
 		return []pwl.Segment{}
 	}
-    worktree, err := repo.Worktree()
-	if err != nil {
-		return []pwl.Segment{}
-	}
-    treeStats, err := worktree.Status()
-	if err != nil {
-		return []pwl.Segment{}
-	}
-    
-   // fmt.Println(treeStats)
-	status := strings.Split(treeStats.String(), "\n")
+
+	status := strings.Split(out, "\n")
 	stats := parseGitStats(status)
+	branchInfo := parseGitBranchInfo(status)
+	var branch string
 
-    ref, err := repo.Head()
-    if err != nil {
-        return []pwl.Segment{}
-    }
-    ref_spec := ref.Strings() // 0 as symbolic, 1 as hex
-    var branch string
-    if len(ref_spec[0]) >= 11 && ref_spec[0][0:11] == "refs/heads/" {
-        // the same as `git symbolic-ref --short HEAD`
-        branch = strings.TrimPrefix(ref_spec[0], "refs/heads/")
-    } else {
-        // the same as `git rev-parse --short HEAD`
-        branch = ref_spec[1][0:7]
-    }
+	if branchInfo["local"] != "" {
+		ahead, _ := strconv.ParseInt(branchInfo["ahead"], 10, 32)
+		stats.ahead = int(ahead)
 
-	// if branchInfo["local"] != "" {
-		// ahead, _ := strconv.ParseInt(branchInfo["ahead"], 10, 32)
-		// stats.ahead = int(ahead)
-//
-		// behind, _ := strconv.ParseInt(branchInfo["behind"], 10, 32)
-		// stats.behind = int(behind)
-//
-		// branch = branchInfo["local"]
-	// } else {
-		// branch = getGitDetachedBranch(p)
-	// }
+		behind, _ := strconv.ParseInt(branchInfo["behind"], 10, 32)
+		stats.behind = int(behind)
+
+		branch = branchInfo["local"]
+	} else {
+		branch = getGitDetachedBranch(p)
+	}
 
 	if len(p.symbols.RepoBranch) > 0 {
 		branch = fmt.Sprintf("%s %s", p.symbols.RepoBranch, branch)
@@ -279,7 +262,7 @@ func segmentGit(p *powerline) []pwl.Segment {
 	}
 
 	if stashEnabled {
-        out, err := runGitCommand("git", "rev-list", "-g", "refs/stash")
+		out, err = runGitCommand("git", "rev-list", "-g", "refs/stash")
 		if err == nil {
 			stats.stashed = strings.Count(out, "\n")
 		}
