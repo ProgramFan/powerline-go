@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-    "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5"
 
 	pwl "github.com/justjanne/powerline-go/powerline"
 )
@@ -55,7 +55,7 @@ func addRepoStatsSymbol2(nChanges int, symbol string, GitMode string) string {
 		if GitMode == "simple" {
 			return symbol
 		} else if GitMode == "compact" {
-			return fmt.Sprintf(" %d%s", nChanges, symbol )
+			return fmt.Sprintf(" %d%s", nChanges, symbol)
 		} else {
 			return symbol
 		}
@@ -101,59 +101,40 @@ func parseGitStats2(status []string) repoStats2 {
 	return stats
 }
 
-func repoRoot2(path string) (string, error) {
-	_, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{
-        DetectDotGit: true,
-        EnableDotGitCommonDir: true,
-    })
-	if err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
 func segmentTinygit(p *powerline) []pwl.Segment {
-	repoRoot, err := repoRoot2(p.cwd)
-	if err != nil {
-		return []pwl.Segment{}
-	}
-
-	if len(p.ignoreRepos) > 0 && p.ignoreRepos[repoRoot] {
-		return []pwl.Segment{}
-	}
-
-    repo, err := git.PlainOpenWithOptions(p.cwd, &git.PlainOpenOptions{
-		DetectDotGit: true,
+	repo, err := git.PlainOpenWithOptions(p.cwd, &git.PlainOpenOptions{
+		DetectDotGit:          true,
 		EnableDotGitCommonDir: true,
-    })
+	})
 	if err != nil {
 		return []pwl.Segment{}
 	}
-    worktree, err := repo.Worktree()
+
+	worktree, err := repo.Worktree()
 	if err != nil {
 		return []pwl.Segment{}
 	}
-    treeStats, err := worktree.Status()
+	treeStats, err := worktree.Status()
 	if err != nil {
 		return []pwl.Segment{}
 	}
-    
+
 	status := strings.Split(treeStats.String(), "\n")
 	stats := parseGitStats2(status)
 
-    ref, err := repo.Head()
-    if err != nil {
-        return []pwl.Segment{}
-    }
-    ref_spec := ref.Strings() // 0 as symbolic, 1 as hex
-    var branch string
-    if len(ref_spec[0]) >= 11 && ref_spec[0][0:11] == "refs/heads/" {
-        // the same as `git symbolic-ref --short HEAD`
-        branch = strings.TrimPrefix(ref_spec[0], "refs/heads/")
-    } else {
-        // the same as `git rev-parse --short HEAD`
-        branch = ref_spec[1][0:7]
-    }
+	ref, err := repo.Head()
+	if err != nil {
+		return []pwl.Segment{}
+	}
+	ref_spec := ref.Strings() // 0 as symbolic, 1 as hex
+	var branch string
+	if len(ref_spec[0]) >= 11 && ref_spec[0][0:11] == "refs/heads/" {
+		// the same as `git symbolic-ref --short HEAD`
+		branch = strings.TrimPrefix(ref_spec[0], "refs/heads/")
+	} else {
+		// the same as `git rev-parse --short HEAD`
+		branch = ref_spec[1][0:7]
+	}
 
 	if len(p.symbols.RepoBranch) > 0 {
 		branch = fmt.Sprintf("%s %s", p.symbols.RepoBranch, branch)
