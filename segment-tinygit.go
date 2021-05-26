@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 
 	pwl "github.com/justjanne/powerline-go/powerline"
 )
@@ -25,6 +26,57 @@ func (r repoStats2) dirty() bool {
 
 func (r repoStats2) any() bool {
 	return r.ahead+r.behind+r.untracked+r.notStaged+r.staged+r.conflicted+r.stashed > 0
+}
+
+func computeRemoteDiff(repo *git.Repository) (int, int) {
+	// Get the curent branch name
+	local_ref, _ := repo.Head()
+	branch := local_ref.Name().Short()
+	conf, _ := repo.Config()
+	branch_conf := conf.Branches[branch]
+	remote_ref_name := plumbing.NewRemoteReferenceName(branch_conf.Remote, branch_conf.Merge.Short())
+	// find the hash tag of the remote reference.
+	remote_ref, _ := repo.Reference(remote_ref_name, true)
+
+	// Case 1: local and remote are equal.
+	ahead, behind := 0, 0
+	if local_ref == remote_ref {
+		return ahead, behind
+	}
+	// Case 2: local either behind or ahead of remote
+	var remote_commits, local_commits []plumbing.Hash
+	local_log, _ := repo.Log(&git.LogOptions{
+		From: local_ref.Hash(),
+	})
+	remote_log, _ := repo.Log(&git.LogOptions{
+		From: remote_ref.Hash(),
+	})
+	local_done, remote_done := false, false
+	for {
+		if local_done && remote_done {
+			break
+		}
+		local_commit, err := local_log.Next()
+		if err == nil {
+			local_commits = append(local_commits, local_commit.Hash)
+		} else {
+			local_done = true
+		}
+		remote_commit, err := remote_log.Next()
+		if err == nil {
+			remote_commits = append(remote_commits, remote_commit.Hash)
+		} else {
+			remote_done = true
+		}
+		if !local_done && local_commit.Hash == remote_ref.Hash() {
+			return 0, len(local_commits) - 1
+		} else if !remote_done && remote_commit.Hash == local_ref.Hash() {
+			return len(local_commits) - 1, 0
+		}
+	}
+	// Case 3: local and remote mismatch, there exists biforcation. We do not
+	// handle this currently. But it is a good idea to compute the fork point.
+	return 0, 0
 }
 
 func addRepoStatsSegment2(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
@@ -156,13 +208,16 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 		Background: background,
 	}}
 
+	want_ahead_behind := true
 	for _, stat := range p.cfg.GitDisableStats {
 		// "ahead, behind, staged, notStaged, untracked, conflicted, stashed"
 		switch stat {
 		case "ahead":
 			stats.ahead = 0
+			want_ahead_behind = false
 		case "behind":
 			stats.behind = 0
+			want_ahead_behind = false
 		case "staged":
 			stats.staged = 0
 		case "notStaged":
@@ -174,6 +229,9 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 		case "stashed":
 			stats.stashed = 0
 		}
+	}
+	if want_ahead_behind {
+		stats.behind, stats.ahead = computeRemoteDiff(repo)
 	}
 
 	if p.cfg.GitMode == "simple" {
