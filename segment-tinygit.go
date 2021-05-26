@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -31,34 +28,21 @@ func (r repoStats2) any() bool {
 	return r.ahead+r.behind+r.untracked+r.notStaged+r.staged+r.conflicted+r.stashed > 0
 }
 
+// Get the root of a repository.
 func repoRoot2(repo *git.Repository) string {
 	tree, _ := repo.Worktree()
-	root := tree.Filesystem.Root()
-	return strings.TrimSpace(root)
+	return strings.TrimSpace(tree.Filesystem.Root())
 }
 
-func countStash(repo *git.Repository) int {
-	root := repoRoot2(repo)
-	conf, _ := repo.Config()
-	bare := conf.Core.IsBare
-	var stash_fn string
-	if bare {
-		stash_fn = path.Join(root, "refs", "stash")
-	} else {
-		stash_fn = path.Join(root, ".git", "refs", "stash")
-	}
-	// Stash file does not exist
-	if _, err := os.Stat(stash_fn); os.IsNotExist(err) {
-		return 0
-	}
-	buf, err := ioutil.ReadFile(stash_fn)
-	if err != nil {
-		return 0
-	}
-	return strings.Count(string(buf), "\n")
+// Check if a repo has stash commits. Due to the inability of go-git to parse
+// reflog, we can only check if the repo has stash, and can not determine how
+// many stash are there.
+func repoHasStash(repo *git.Repository) bool {
+	_, err := repo.Reference("refs/stash", true)
+	return err == nil
 }
 
-func computeRemoteDiff(repo *git.Repository) (int, int) {
+func repoAheadBehind(repo *git.Repository) (int, int) {
 	// Find local and remote ref
 	local_ref, _ := repo.Head()
 	branch := local_ref.Name().Short()
@@ -257,17 +241,17 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 		Background: background,
 	}}
 
-	want_ahead_behind := true
-	want_stash := true
+	askedAheadBehind := true
+	askedStash := true
 	for _, stat := range p.cfg.GitDisableStats {
 		// "ahead, behind, staged, notStaged, untracked, conflicted, stashed"
 		switch stat {
 		case "ahead":
 			stats.ahead = 0
-			want_ahead_behind = false
+			askedAheadBehind = false
 		case "behind":
 			stats.behind = 0
-			want_ahead_behind = false
+			askedAheadBehind = false
 		case "staged":
 			stats.staged = 0
 		case "notStaged":
@@ -278,14 +262,14 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 			stats.conflicted = 0
 		case "stashed":
 			stats.stashed = 0
-			want_stash = false
+			askedStash = false
 		}
 	}
-	if want_ahead_behind {
-		stats.ahead, stats.behind = computeRemoteDiff(repo)
+	if askedAheadBehind {
+		stats.ahead, stats.behind = repoAheadBehind(repo)
 	}
-	if want_stash {
-		stats.stashed = countStash(repo)
+	if askedStash && repoHasStash(repo) {
+		stats.stashed = 1
 	}
 
 	if p.cfg.GitMode == "simple" {
