@@ -29,11 +29,14 @@ func (r repoStats2) any() bool {
 }
 
 func computeRemoteDiff(repo *git.Repository) (int, int) {
-	// Get the curent branch name
+	// Find local and remote ref
 	local_ref, _ := repo.Head()
 	branch := local_ref.Name().Short()
 	conf, _ := repo.Config()
-	branch_conf := conf.Branches[branch]
+	branch_conf, ok := conf.Branches[branch]
+	if !ok {
+		return 0, 0
+	}
 	remote_ref_name := plumbing.NewRemoteReferenceName(branch_conf.Remote, branch_conf.Merge.Short())
 	// find the hash tag of the remote reference.
 	remote_ref, _ := repo.Reference(remote_ref_name, true)
@@ -69,9 +72,9 @@ func computeRemoteDiff(repo *git.Repository) (int, int) {
 			remote_done = true
 		}
 		if !local_done && local_commit.Hash == remote_ref.Hash() {
-			return 0, len(local_commits) - 1
-		} else if !remote_done && remote_commit.Hash == local_ref.Hash() {
 			return len(local_commits) - 1, 0
+		} else if !remote_done && remote_commit.Hash == local_ref.Hash() {
+			return 0, len(local_commits) - 1
 		}
 	}
 	// Case 3: local and remote mismatch, there exists biforcation. We do not
@@ -178,14 +181,11 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 	if err != nil {
 		return []pwl.Segment{}
 	}
-	ref_spec := ref.Strings() // 0 as symbolic, 1 as hex
 	var branch string
-	if len(ref_spec[0]) >= 11 && ref_spec[0][0:11] == "refs/heads/" {
-		// the same as `git symbolic-ref --short HEAD`
-		branch = strings.TrimPrefix(ref_spec[0], "refs/heads/")
+	if ref.Name().IsBranch() {
+		branch = ref.Name().Short()
 	} else {
-		// the same as `git rev-parse --short HEAD`
-		branch = ref_spec[1][0:7]
+		branch = ref.Hash().String()[:7]
 	}
 
 	if len(p.symbols.RepoBranch) > 0 {
@@ -231,7 +231,7 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 		}
 	}
 	if want_ahead_behind {
-		stats.behind, stats.ahead = computeRemoteDiff(repo)
+		stats.ahead, stats.behind = computeRemoteDiff(repo)
 	}
 
 	if p.cfg.GitMode == "simple" {
