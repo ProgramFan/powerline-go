@@ -77,9 +77,21 @@ func computeRemoteDiff(repo *git.Repository) (int, int) {
 			return 0, len(local_commits) - 1
 		}
 	}
-	// Case 3: local and remote mismatch, there exists biforcation. We do not
-	// handle this currently. But it is a good idea to compute the fork point.
-	return 0, 0
+	// Case 3: local and remote mismatch, there exists biforcation. We find the
+	// biforcation from the beginning of the two lists.
+	len_local_commits := len(local_commits)
+	len_remote_commits := len(remote_commits)
+	bound := len_local_commits
+	if len_remote_commits < bound {
+		bound = len_remote_commits
+	}
+	i := 0
+	for ; i < bound; i++ {
+		if local_commits[len_local_commits-1-i] != remote_commits[len_remote_commits-1-i] {
+			break
+		}
+	}
+	return len_local_commits - i, len_remote_commits - i
 }
 
 func addRepoStatsSegment2(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
