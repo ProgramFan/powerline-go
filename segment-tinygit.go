@@ -142,8 +142,11 @@ func (r repoStats2) GitSegments2(p *powerline) (segments []pwl.Segment) {
 	segments = append(segments, addRepoStatsSegment2(r.staged, p.symbols.RepoStaged, p.theme.GitStagedFg, p.theme.GitStagedBg)...)
 	segments = append(segments, addRepoStatsSegment2(r.notStaged, p.symbols.RepoNotStaged, p.theme.GitNotStagedFg, p.theme.GitNotStagedBg)...)
 	segments = append(segments, addRepoStatsSegment2(r.untracked, p.symbols.RepoUntracked, p.theme.GitUntrackedFg, p.theme.GitUntrackedBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.conflicted, p.symbols.RepoConflicted, p.theme.GitConflictedFg, p.theme.GitConflictedBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.stashed, p.symbols.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)...)
+	if r.stashed > 0 {
+		seg := addRepoStatsSegment2(r.stashed, p.symbols.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)
+		seg[0].Content = fmt.Sprintf("%s", p.symbols.RepoStashed)
+		segments = append(segments, seg...)
+	}
 	return
 }
 
