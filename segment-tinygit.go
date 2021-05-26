@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -26,6 +29,33 @@ func (r repoStats2) dirty() bool {
 
 func (r repoStats2) any() bool {
 	return r.ahead+r.behind+r.untracked+r.notStaged+r.staged+r.conflicted+r.stashed > 0
+}
+
+func repoRoot2(repo *git.Repository) string {
+	tree, _ := repo.Worktree()
+	root := tree.Filesystem.Root()
+	return strings.TrimSpace(root)
+}
+
+func countStash(repo *git.Repository) int {
+	root := repoRoot2(repo)
+	conf, _ := repo.Config()
+	bare := conf.Core.IsBare
+	var stash_fn string
+	if bare {
+		stash_fn = path.Join(root, "refs", "stash")
+	} else {
+		stash_fn = path.Join(root, ".git", "refs", "stash")
+	}
+	// Stash file does not exist
+	if _, err := os.Stat(stash_fn); os.IsNotExist(err) {
+		return 0
+	}
+	buf, err := ioutil.ReadFile(stash_fn)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(buf), "\n")
 }
 
 func computeRemoteDiff(repo *git.Repository) (int, int) {
@@ -176,6 +206,10 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 	if err != nil {
 		return []pwl.Segment{}
 	}
+	root := repoRoot2(repo)
+	if len(p.ignoreRepos) > 0 && p.ignoreRepos[root] {
+		return []pwl.Segment{}
+	}
 
 	worktree, err := repo.Worktree()
 	if err != nil {
@@ -221,6 +255,7 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 	}}
 
 	want_ahead_behind := true
+	want_stash := true
 	for _, stat := range p.cfg.GitDisableStats {
 		// "ahead, behind, staged, notStaged, untracked, conflicted, stashed"
 		switch stat {
@@ -240,10 +275,14 @@ func segmentTinygit(p *powerline) []pwl.Segment {
 			stats.conflicted = 0
 		case "stashed":
 			stats.stashed = 0
+			want_stash = false
 		}
 	}
 	if want_ahead_behind {
 		stats.ahead, stats.behind = computeRemoteDiff(repo)
+	}
+	if want_stash {
+		stats.stashed = countStash(repo)
 	}
 
 	if p.cfg.GitMode == "simple" {
