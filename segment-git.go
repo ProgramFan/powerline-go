@@ -6,10 +6,12 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	pwl "github.com/justjanne/powerline-go/powerline"
 )
 
+// Detailed repository and working tree status
 type repoStats struct {
 	ahead      int
 	behind     int
@@ -20,95 +22,18 @@ type repoStats struct {
 	stashed    int
 }
 
+// Check if the working tree is dirty
 func (r repoStats) dirty() bool {
 	return r.untracked+r.notStaged+r.staged+r.conflicted > 0
 }
 
+// Check if there are any useful details to display
 func (r repoStats) any() bool {
 	return r.ahead+r.behind+r.untracked+r.notStaged+r.staged+r.conflicted+r.stashed > 0
 }
 
-// Get the root of a repository.
-func repoRoot(repo *git.Repository) string {
-	tree, _ := repo.Worktree()
-	return strings.TrimSpace(tree.Filesystem.Root())
-}
-
-// Check if a repo has stash commits. Due to the inability of go-git to parse
-// reflog, we can only check if the repo has stash, and can not determine how
-// many stash are there.
-func repoHasStash(repo *git.Repository) bool {
-	_, err := repo.Reference("refs/stash", true)
-	return err == nil
-}
-
-func repoAheadBehind(repo *git.Repository) (int, int) {
-	// Find local and remote ref
-	local_ref, _ := repo.Head()
-	branch := local_ref.Name().Short()
-	conf, _ := repo.Config()
-	branch_conf, ok := conf.Branches[branch]
-	if !ok {
-		return 0, 0
-	}
-	remote_ref_name := plumbing.NewRemoteReferenceName(branch_conf.Remote, branch_conf.Merge.Short())
-	// find the hash tag of the remote reference.
-	remote_ref, _ := repo.Reference(remote_ref_name, true)
-
-	// Case 1: local and remote are equal.
-	ahead, behind := 0, 0
-	if local_ref == remote_ref {
-		return ahead, behind
-	}
-	// Case 2: local either behind or ahead of remote
-	var remote_commits, local_commits []plumbing.Hash
-	local_log, _ := repo.Log(&git.LogOptions{
-		From: local_ref.Hash(),
-	})
-	remote_log, _ := repo.Log(&git.LogOptions{
-		From: remote_ref.Hash(),
-	})
-	local_done, remote_done := false, false
-	for {
-		if local_done && remote_done {
-			break
-		}
-		local_commit, err := local_log.Next()
-		if err == nil {
-			local_commits = append(local_commits, local_commit.Hash)
-		} else {
-			local_done = true
-		}
-		remote_commit, err := remote_log.Next()
-		if err == nil {
-			remote_commits = append(remote_commits, remote_commit.Hash)
-		} else {
-			remote_done = true
-		}
-		if !local_done && local_commit.Hash == remote_ref.Hash() {
-			return len(local_commits) - 1, 0
-		} else if !remote_done && remote_commit.Hash == local_ref.Hash() {
-			return 0, len(local_commits) - 1
-		}
-	}
-	// Case 3: local and remote mismatch, there exists biforcation. We find the
-	// biforcation from the beginning of the two lists.
-	len_local_commits := len(local_commits)
-	len_remote_commits := len(remote_commits)
-	bound := len_local_commits
-	if len_remote_commits < bound {
-		bound = len_remote_commits
-	}
-	i := 0
-	for ; i < bound; i++ {
-		if local_commits[len_local_commits-1-i] != remote_commits[len_remote_commits-1-i] {
-			break
-		}
-	}
-	return len_local_commits - i, len_remote_commits - i
-}
-
-func addRepoStatsSegment2(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
+// Build a segment representing one repo stats
+func addRepoStatsSegment(nChanges int, symbol string, foreground uint8, background uint8) []pwl.Segment {
 	if nChanges > 0 {
 		return []pwl.Segment{{
 			Name:       "git-status",
@@ -120,21 +45,22 @@ func addRepoStatsSegment2(nChanges int, symbol string, foreground uint8, backgro
 	return []pwl.Segment{}
 }
 
-func (r repoStats) GitSegments2(p *powerline) (segments []pwl.Segment) {
-	segments = append(segments, addRepoStatsSegment2(r.ahead, p.symbols.RepoAhead, p.theme.GitAheadFg, p.theme.GitAheadBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.behind, p.symbols.RepoBehind, p.theme.GitBehindFg, p.theme.GitBehindBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.staged, p.symbols.RepoStaged, p.theme.GitStagedFg, p.theme.GitStagedBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.notStaged, p.symbols.RepoNotStaged, p.theme.GitNotStagedFg, p.theme.GitNotStagedBg)...)
-	segments = append(segments, addRepoStatsSegment2(r.untracked, p.symbols.RepoUntracked, p.theme.GitUntrackedFg, p.theme.GitUntrackedBg)...)
+// Build segments representing the stats
+func (r repoStats) GitSegments(p *powerline) (segments []pwl.Segment) {
+	segments = append(segments, addRepoStatsSegment(r.ahead, p.symbols.RepoAhead, p.theme.GitAheadFg, p.theme.GitAheadBg)...)
+	segments = append(segments, addRepoStatsSegment(r.behind, p.symbols.RepoBehind, p.theme.GitBehindFg, p.theme.GitBehindBg)...)
+	segments = append(segments, addRepoStatsSegment(r.staged, p.symbols.RepoStaged, p.theme.GitStagedFg, p.theme.GitStagedBg)...)
+	segments = append(segments, addRepoStatsSegment(r.notStaged, p.symbols.RepoNotStaged, p.theme.GitNotStagedFg, p.theme.GitNotStagedBg)...)
+	segments = append(segments, addRepoStatsSegment(r.untracked, p.symbols.RepoUntracked, p.theme.GitUntrackedFg, p.theme.GitUntrackedBg)...)
 	if r.stashed > 0 {
-		seg := addRepoStatsSegment2(r.stashed, p.symbols.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)
+		seg := addRepoStatsSegment(r.stashed, p.symbols.RepoStashed, p.theme.GitStashedFg, p.theme.GitStashedBg)
 		seg[0].Content = fmt.Sprintf("%s", p.symbols.RepoStashed)
 		segments = append(segments, seg...)
 	}
 	return
 }
 
-func addRepoStatsSymbol2(nChanges int, symbol string, GitMode string) string {
+func addRepoStatsSymbol(nChanges int, symbol string, GitMode string) string {
 	if nChanges > 0 {
 		if GitMode == "simple" {
 			return symbol
@@ -149,17 +75,17 @@ func addRepoStatsSymbol2(nChanges int, symbol string, GitMode string) string {
 
 func (r repoStats) GitSymbols(p *powerline) string {
 	var info string
-	info += addRepoStatsSymbol2(r.ahead, p.symbols.RepoAhead, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.behind, p.symbols.RepoBehind, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.staged, p.symbols.RepoStaged, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.notStaged, p.symbols.RepoNotStaged, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.untracked, p.symbols.RepoUntracked, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.conflicted, p.symbols.RepoConflicted, p.cfg.GitMode)
-	info += addRepoStatsSymbol2(r.stashed, p.symbols.RepoStashed, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.ahead, p.symbols.RepoAhead, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.behind, p.symbols.RepoBehind, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.staged, p.symbols.RepoStaged, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.notStaged, p.symbols.RepoNotStaged, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.untracked, p.symbols.RepoUntracked, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.conflicted, p.symbols.RepoConflicted, p.cfg.GitMode)
+	info += addRepoStatsSymbol(r.stashed, p.symbols.RepoStashed, p.cfg.GitMode)
 	return info
 }
 
-func parseGitStats2(status []string) repoStats {
+func parseGitStats(status []string) repoStats {
 	stats := repoStats{}
 	if len(status) > 1 {
 		for _, line := range status {
@@ -185,6 +111,138 @@ func parseGitStats2(status []string) repoStats {
 	return stats
 }
 
+// Get the root of a repository.
+func repoRoot(repo *git.Repository) string {
+	tree, _ := repo.Worktree()
+	return strings.TrimSpace(tree.Filesystem.Root())
+}
+
+// Check if a repo has stash commits. Due to the inability of go-git to parse
+// reflog, we can only check if the repo has stash, and can not determine how
+// many stash are there.
+func repoHasStash(repo *git.Repository) bool {
+	_, err := repo.Reference("refs/stash", true)
+	return err == nil
+}
+
+// Determine the difference of current branch and its upstream branch. Returns
+// (ahead, behind) denoting how many commits ahead of the remote and how many
+// commits behind the remote.
+func repoAheadBehind(repo *git.Repository) (int, int) {
+	// Generate the local and remote branch reference
+	localRef, _ := repo.Head()
+	if !localRef.Name().IsBranch() {
+		return 0, 0
+	}
+	conf, _ := repo.Config()
+	branch := localRef.Name().Short()
+	branchConf, ok := conf.Branches[branch]
+	if !ok {
+		return 0, 0
+	}
+	remoteBranchName := plumbing.NewRemoteReferenceName(
+		branchConf.Remote, branchConf.Merge.Short())
+	remoteRef, err := repo.Reference(remoteBranchName, true)
+	if err != nil || !remoteRef.Name().IsRemote() {
+		return 0, 0
+	}
+
+	// Determine the difference. We assume the local and remote branch orginate
+	// from the same initial commit (always true if the local branch tracks the
+	// remote branch). The algorithm first checks if there is no diffrence since
+	// it is the most common case. It then checks if the local is either ahead
+	// of or behind the remote by comparing the history with the branch head. At
+	// the same time, it populates the history list. If this step fails, the
+	// branches go into different ways. So the final step is to find the latest
+	// common roots of the two branches by traversing the history. The algorithm
+	// will always return meaningful results.
+
+	// Case 1: local and remote are equal.
+	ahead, behind := 0, 0
+	if localRef == remoteRef {
+		return ahead, behind
+	}
+	// Case 2: local either behind or ahead of remote
+	var remoteCommits, localCommits []plumbing.Hash
+	localLog, _ := repo.Log(&git.LogOptions{
+		From: localRef.Hash(),
+	})
+	remoteLog, _ := repo.Log(&git.LogOptions{
+		From: remoteRef.Hash(),
+	})
+	localEOI, remoteEOI := false, false
+	var localCommit, remoteCommit *object.Commit
+	for {
+		if localEOI && remoteEOI {
+			break
+		}
+		if !localEOI {
+			localCommit, err = localLog.Next()
+			if err == nil {
+				localCommits = append(localCommits, localCommit.Hash)
+			} else {
+				localEOI = true
+			}
+		}
+		if !remoteEOI {
+			remoteCommit, err = remoteLog.Next()
+			if err == nil {
+				remoteCommits = append(remoteCommits, remoteCommit.Hash)
+			} else {
+				remoteEOI = true
+			}
+		}
+		if !localEOI && localCommit.Hash == remoteRef.Hash() {
+			return len(localCommits) - 1, 0
+		} else if !remoteEOI && remoteCommit.Hash == localRef.Hash() {
+			return 0, len(localCommits) - 1
+		}
+	}
+	// Case 3: local and remote mismatch, there exists biforcation. We find the
+	// biforcation from the beginning of the two lists.
+	localCommitsCount := len(localCommits)
+	remoteCommitsCount := len(remoteCommits)
+	bound := localCommitsCount
+	if remoteCommitsCount < bound {
+		bound = remoteCommitsCount
+	}
+	i := 0
+	for ; i < bound; i++ {
+		localCommit := localCommits[localCommitsCount-1-i]
+		remoteCommit := remoteCommits[remoteCommitsCount-1-i]
+		if localCommit != remoteCommit {
+			break
+		}
+	}
+	return localCommitsCount - i, remoteCommitsCount - i
+}
+
+func repoBranch(repo *git.Repository) string {
+	ref, err := repo.Head()
+	if err != nil {
+		return ""
+	}
+	if ref.Name().IsBranch() {
+		return ref.Name().Short()
+	} else {
+		return ref.Hash().String()[:7]
+	}
+}
+
+func repoStatus(repo *git.Repository) repoStats {
+	var stats repoStats
+	tree, err := repo.Worktree()
+	if err != nil {
+		return stats
+	}
+	treeStats, err := tree.Status()
+	if err != nil {
+		return stats
+	}
+	status := strings.Split(treeStats.String(), "\n")
+	return parseGitStats(status)
+}
+
 func segmentGit(p *powerline) []pwl.Segment {
 	repo, err := git.PlainOpenWithOptions(p.cwd, &git.PlainOpenOptions{
 		DetectDotGit:          true,
@@ -198,33 +256,12 @@ func segmentGit(p *powerline) []pwl.Segment {
 		return []pwl.Segment{}
 	}
 
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return []pwl.Segment{}
-	}
-	treeStats, err := worktree.Status()
-	if err != nil {
-		return []pwl.Segment{}
-	}
-
-	status := strings.Split(treeStats.String(), "\n")
-	stats := parseGitStats2(status)
-
-	ref, err := repo.Head()
-	if err != nil {
-		return []pwl.Segment{}
-	}
-	var branch string
-	if ref.Name().IsBranch() {
-		branch = ref.Name().Short()
-	} else {
-		branch = ref.Hash().String()[:7]
-	}
-
+	branch := repoBranch(repo)
 	if len(p.symbols.RepoBranch) > 0 {
 		branch = fmt.Sprintf("%s %s", p.symbols.RepoBranch, branch)
 	}
 
+	stats := repoStatus(repo)
 	var foreground, background uint8
 	if stats.dirty() {
 		foreground = p.theme.RepoDirtyFg
@@ -281,7 +318,7 @@ func segmentGit(p *powerline) []pwl.Segment {
 			segments[0].Content += stats.GitSymbols(p)
 		}
 	} else { // fancy
-		segments = append(segments, stats.GitSegments2(p)...)
+		segments = append(segments, stats.GitSegments(p)...)
 	}
 
 	return segments
